@@ -37,10 +37,10 @@ def connect_with_middleware(contract_json):
 	# and https://web3py.readthedocs.io/en/stable/web3.contract.html
 
 	# 3. Inject middleware (BNB testnet uses Proof of Authority)
-  w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+  	w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
-  # 4. Create contract object
-  contract = w3.eth.contract(address=address, abi=abi)
+  	# 4. Create contract object
+  	contract = w3.eth.contract(address=address, abi=abi)
 
 	return w3, contract
 
