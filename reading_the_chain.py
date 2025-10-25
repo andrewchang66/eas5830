@@ -99,7 +99,7 @@ def is_ordered_block(w3, block_num):
 		return ordered
 
     # Compute the "effective total fee per gas" for each tx
-    fees = []
+	fees = []
 	for tx in txs:
 		eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=tx)\
 		if eff is None:
