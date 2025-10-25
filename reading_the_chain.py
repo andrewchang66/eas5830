@@ -16,14 +16,35 @@ from web3.providers.rpc import HTTPProvider
 # infura_url = f"https://mainnet.infura.io/v3/{infura_token}"
 
 def connect_to_eth():
-	url = "https://mainnet.infura.io/v3/f9c380c5d2044479a7c6f03e29ed21f2"
+	url = "https://mainnet.infura.io/v3/f9c380c5d2044479a7c6f03e29ed21f2"  # FILL THIS IN
 	w3 = Web3(HTTPProvider(url))
 	assert w3.is_connected(), f"Failed to connect to provider at {url}"
 	return w3
 
 
 def connect_with_middleware(contract_json):
-	# TODO insert your code for this method from last week's assignment
+	# 1. Load contract info
+	with open(contract_json, "r") as f:
+		d = json.load(f)
+		d = d['bsc']
+		address = d['address']
+		abi = d['abi']
+
+	# 2. Connect to the BNB testnet
+	# The first section will be the same as "connect_to_eth()" but with a BNB url
+	url = "https://bsc-testnet.core.chainstack.com/70f6e78e9ad08a59e6150ce5fb02da84"
+	w3 = Web3(HTTPProvider(url))
+	assert w3.is_connected(), f"Failed to connect to provider at {url}"
+
+	# The second section requires you to inject middleware into your w3 object and
+	# create a contract object. Read more on the docs pages at https://web3py.readthedocs.io/en/stable/middleware.html
+	# and https://web3py.readthedocs.io/en/stable/web3.contract.html
+
+	# 3. Inject middleware (BNB testnet uses Proof of Authority)
+	w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
+  	# 4. Create contract object
+	contract = w3.eth.contract(address=address, abi=abi)
 	return w3, contract
 
 
