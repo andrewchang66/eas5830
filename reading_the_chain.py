@@ -90,22 +90,22 @@ def is_ordered_block(w3, block_num):
 	##### TODO YOUR CODE HERE #####
 
     # Get baseFeePerGas (only exists post-London)
-    base_fee = block.get("baseFeePerGas", None)
-    txs = block.get("transactions", [])
+	base_fee = block.get("baseFeePerGas", None)
+	txs = block.get("transactions", [])
 
     # Handle empty or single-tx blocks
-    if len(txs) <= 1:
-        ordered = True
-        return ordered
+	if len(txs) <= 1:
+		ordered = True
+		return ordered
 
     # Compute the "effective total fee per gas" for each tx
     fees = []
-    for tx in txs:
-        eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=tx)
-        if eff is None:
-            # Fallback in case transaction object is partial
-            full_tx = w3.eth.get_transaction(tx["hash"])
-            eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=full_tx)
+	for tx in txs:
+		eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=tx)\
+		if eff is None:
+			# Fallback in case transaction object is partial
+			full_tx = w3.eth.get_transaction(tx["hash"])
+			eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=full_tx)
         if eff is None:
             # If still missing, we cannot confirm ordering
             ordered = False
@@ -114,9 +114,9 @@ def is_ordered_block(w3, block_num):
 
     # Check if all fees are non-increasing
     if all(fees[i] >= fees[i + 1] for i in range(len(fees) - 1)):
-        ordered = True
+		ordered = True
     else:
-        ordered = False
+		ordered = False
 
 	return ordered
 
