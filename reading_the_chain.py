@@ -1,3 +1,8 @@
+# new import
+import os
+from typing import Optional, Tuple, List
+
+# template import
 import random
 import json
 from web3 import Web3
@@ -11,7 +16,9 @@ from web3.providers.rpc import HTTPProvider
 # infura_url = f"https://mainnet.infura.io/v3/{infura_token}"
 
 def connect_to_eth():
-	# TODO insert your code for this method from last week's assignment
+	url = "https://mainnet.infura.io/v3/f9c380c5d2044479a7c6f03e29ed21f2"
+	w3 = Web3(HTTPProvider(url))
+	assert w3.is_connected(), f"Failed to connect to provider at {url}"
 	return w3
 
 
