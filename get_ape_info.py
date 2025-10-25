@@ -15,7 +15,7 @@ with open('ape_abi.json', 'r') as f:
 
 ############################
 # Connect to an Ethereum node
-api_url = ""  # YOU WILL NEED TO PROVIDE THE URL OF AN ETHEREUM NODE
+api_url = "https://mainnet.infura.io/v3/a8ee719dbdde49b6b29704b13d8c583a"  # YOU WILL NEED TO PROVIDE THE URL OF AN ETHEREUM NODE
 provider = HTTPProvider(api_url)
 web3 = Web3(provider)
 
@@ -27,7 +27,27 @@ def get_ape_info(ape_id):
 
     data = {'owner': "", 'image': "", 'eyes': ""}
 
-    # YOUR CODE HERE
+    ##### YOUR CODE HERE #####
+
+    owner = contract.functions.ownerOf(ape_id).call()
+    token_uri = contract.functions.tokenURI(ape_id).call()
+
+    # Inline IPFS → HTTP conversion for fetching only
+    metadata_url = token_uri if token_uri.startswith("http") else f"https://ipfs.io/ipfs/{token_uri[7:]}"
+    metadata = requests.get(metadata_url, timeout=30).json()
+
+    data['owner'] = Web3.to_checksum_address(owner)
+    data['image'] = metadata.get("image", "")
+
+    eyes_value = ""
+    for attr in metadata.get("attributes", []):
+        if (attr.get("trait_type") or "").lower() == "eyes":
+            eyes_value = attr.get("value", "")
+            break
+    data['eyes'] = eyes_value
+
+    
+    ##### #####
 
     assert isinstance(data, dict), f'get_ape_info{ape_id} should return a dict'
     assert all([a in data.keys() for a in
