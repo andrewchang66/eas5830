@@ -1,5 +1,4 @@
 # new import
-import os
 from typing import Optional, Tuple, List
 
 # template import
@@ -47,6 +46,30 @@ def connect_with_middleware(contract_json):
 	contract = w3.eth.contract(address=address, abi=abi)
 	return w3, contract
 
+###############################################################################
+# Helpers for Part 1 — ordered-by-fee check
+###############################################################################
+
+def _effective_total_fee_per_gas(*, base_fee: Optional[int], tx: dict) -> Optional[int]:
+    """
+    Compute the *effective total fee per gas* the sender pays for this tx (wei/gas):
+      - EIP-1559 (type 2): min(maxFeePerGas, maxPriorityFeePerGas + baseFeePerGas)
+      - Legacy/type 0 (or where gasPrice is present): gasPrice
+      - If fields missing: None
+    """
+    max_fee = tx.get("maxFeePerGas")
+    max_priority = tx.get("maxPriorityFeePerGas")
+    gas_price = tx.get("gasPrice")
+
+    if max_fee is not None and max_priority is not None:
+        if base_fee is None:
+            return None
+        return min(int(max_fee), int(max_priority) + int(base_fee))
+
+    if gas_price is not None:
+        return int(gas_price)
+
+    return None
 
 def is_ordered_block(w3, block_num):
 	"""
@@ -64,7 +87,36 @@ def is_ordered_block(w3, block_num):
 	block = w3.eth.get_block(block_num, full_transactions=True)
 	ordered = False
 
-	# TODO YOUR CODE HERE
+	##### TODO YOUR CODE HERE #####
+
+    # Get baseFeePerGas (only exists post-London)
+    base_fee = block.get("baseFeePerGas", None)
+    txs = block.get("transactions", [])
+
+    # Handle empty or single-tx blocks
+    if len(txs) <= 1:
+        ordered = True
+        return ordered
+
+    # Compute the "effective total fee per gas" for each tx
+    fees = []
+    for tx in txs:
+        eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=tx)
+        if eff is None:
+            # Fallback in case transaction object is partial
+            full_tx = w3.eth.get_transaction(tx["hash"])
+            eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=full_tx)
+        if eff is None:
+            # If still missing, we cannot confirm ordering
+            ordered = False
+            return ordered
+        fees.append(int(eff))
+
+    # Check if all fees are non-increasing
+    if all(fees[i] >= fees[i + 1] for i in range(len(fees) - 1)):
+        ordered = True
+    else:
+        ordered = False
 
 	return ordered
 
