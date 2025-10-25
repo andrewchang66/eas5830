@@ -101,7 +101,7 @@ def is_ordered_block(w3, block_num):
     # Compute the "effective total fee per gas" for each tx
 	fees = []
 	for tx in txs:
-		eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=tx)\
+		eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=tx)
 		if eff is None:
 			# Fallback in case transaction object is partial
 			full_tx = w3.eth.get_transaction(tx["hash"])
