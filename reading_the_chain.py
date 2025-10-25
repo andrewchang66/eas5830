@@ -120,6 +120,9 @@ def is_ordered_block(w3, block_num):
 
 	return ordered
 
+###############################################################################
+# Part 2 — Contract reads (BNB testnet)
+###############################################################################
 
 def get_contract_values(contract, admin_address, owner_address):
 	"""
@@ -135,13 +138,20 @@ def get_contract_values(contract, admin_address, owner_address):
 	check on available contract functions and transactions on the block explorer at
 	https://testnet.bscscan.com/address/0xaA7CAaDA823300D18D3c43f65569a47e78220073
 	"""
+	# Default admin role (fixed 32-byte zero value)
 	default_admin_role = int.to_bytes(0, 32, byteorder="big")
 
 	# TODO complete the following lines by performing contract calls
-	onchain_root = 0  # Get and return the merkleRoot from the provided contract
-	has_role = 0  # Check the contract to see if the address "admin_address" has the role "default_admin_role"
-	prime = 0  # Call the contract to get the prime owned by "owner_address"
+	# Read merkleRoot from the contract
+	onchain_root = contract.functions.merkleRoot().call()
 
+	# Check whether the given admin address has the default admin role
+	has_role = contract.functions.hasRole(default_admin_role, admin_address).call() 
+
+	# Retrieve the prime number associated with the owner
+	# Call the contract to get the prime owned by "owner_address"
+	prime = contract.functions.getPrimeByOwner(owner_address).call()  
+	
 	return onchain_root, has_role, prime
 
 
