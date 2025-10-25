@@ -19,6 +19,9 @@ api_url = "https://mainnet.infura.io/v3/a8ee719dbdde49b6b29704b13d8c583a"  # YOU
 provider = HTTPProvider(api_url)
 web3 = Web3(provider)
 
+############################
+# Create contract object
+contract = web3.eth.contract(address=contract_address, abi=abi)
 
 def get_ape_info(ape_id):
     assert isinstance(ape_id, int), f"{ape_id} is not an int"
