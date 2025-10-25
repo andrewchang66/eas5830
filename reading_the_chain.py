@@ -110,12 +110,12 @@ def is_ordered_block(w3, block_num):
 			# If still missing, we cannot confirm ordering
 			ordered = False
 			return ordered
-        fees.append(int(eff))
+		fees.append(int(eff))
 
     # Check if all fees are non-increasing
-    if all(fees[i] >= fees[i + 1] for i in range(len(fees) - 1)):
+	if all(fees[i] >= fees[i + 1] for i in range(len(fees) - 1)):
 		ordered = True
-    else:
+	else:
 		ordered = False
 
 	return ordered
