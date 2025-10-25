@@ -106,10 +106,10 @@ def is_ordered_block(w3, block_num):
 			# Fallback in case transaction object is partial
 			full_tx = w3.eth.get_transaction(tx["hash"])
 			eff = _effective_total_fee_per_gas(base_fee=base_fee, tx=full_tx)
-        if eff is None:
-            # If still missing, we cannot confirm ordering
-            ordered = False
-            return ordered
+		if eff is None:
+			# If still missing, we cannot confirm ordering
+			ordered = False
+			return ordered
         fees.append(int(eff))
 
     # Check if all fees are non-increasing
