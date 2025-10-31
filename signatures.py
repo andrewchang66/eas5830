@@ -1,19 +1,30 @@
+from __future__ import annotations
+
+##### Existing #####
+
 from web3 import Web3
 import eth_account
 from eth_account.messages import encode_defunct
+
+##### new #####
+
+from eth_account.datastructures import SignedMessage
+import random
+import string
 
 
 def sign(m):
     w3 = Web3()
 
     # TODO create an account for signing the message
-    account_object = 0  # Create an Eth account
-    public_key = 0  # Eth account public key
-    private_key = 0  # Eth account private key
+    # Create a new ephemeral account (ECDSA secp256k1 keypair)
+    account_object = eth_account.Account.create()  # Create an Eth account
+    public_key = account_object.address            # Eth account public key
+    private_key = account_object.key               # Eth account private key
 
     # TODO sign the given message "m"
-    message = m  # Encode the message
-    signed_message = 0  # Sign the message
+    message = encode_defunct(text=m)                                                    # Encode the message
+    signed_message = w3.eth.account.sign_message(message, private_key=private_key)      # Sign the message with the private key
 
 
     """You can save the account public/private keypair that prints in the next section
@@ -33,9 +44,18 @@ def verify(m, public_key, signed_message):
     w3 = Web3()
 
     # TODO verify the 'signed_message' is valid given the original message 'm' and the signers 'public_key'
-    message = m  # Encode the message
-    signer = 0  # Verify the message
-    valid_signature = 0  # True if message verifies, False if message does not verify
+    message = encode_defunct(text=m)          # Encode the message
+    
+    try:
+        # signer -> recovered address from the signature
+        signer = w3.eth.account.recover_message(message, signature=signed_message.signature)
+    except Exception:
+        # If recovery fails, conform to the template by returning a boolean result
+        valid_signature = False
+        return valid_signature
+
+    # valid_signature -> boolean comparison of recovered vs. claimed address
+    valid_signature = signer.lower() == public_key.lower()
 
     assert isinstance(valid_signature, bool), "verify should return a boolean value"
     return valid_signature
