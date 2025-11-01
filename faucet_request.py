@@ -17,17 +17,17 @@ reuse this account for future assignments that require you to use a
 """
 
 # Do you need an account? (True or False)
-create_account = True
+create_account = False
 
 # If you have an account you want to use make sure 'create_account' is False,
 # complete the following fields and 'run tests' again to verify the information
-name = '<your name>'  # Your name
-e_mail = '<your e-mail address>'  # this should be your e-mail in ed-stem
-account = '<your avax account>'  # The account you want the funds in
-secret_key = '<your account secret key>'  # The secret key for your account
+name = 'Ting Kang Chang'  # Your name
+e_mail = 'andrectk@seas.upenn.edu'  # this should be your e-mail in ed-stem
+account = '0x8c85b13868b0d08e16afd7a32722b7fa4b63ab9c'  # The account you want the funds in
+secret_key = '18e15a7521af2c4deee0ec7d6f3d6395f13f4a98813eb368832103eee0e0e008'  # The secret key for your account
 
 # Networks you want funding from (True or False)
-AVAX = False
+AVAX = True
 BNB = False
 
 '''
