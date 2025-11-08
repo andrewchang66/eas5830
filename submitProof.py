@@ -198,7 +198,10 @@ def send_signed_msg(proof, random_leaf):
         "gas": gas_est,
     })
     signed = acct.sign_transaction(tx)
-    tx_hash_bytes = w3.eth.send_raw_transaction(signed.rawTransaction)
+    raw = getattr(signed, 'rawTransaction', None)
+    if raw is None:
+        raw = getattr(signed, 'raw_transaction')
+    tx_hash_bytes = w3.eth.send_raw_transaction(raw)
     tx_hash = tx_hash_bytes.hex()
 
     return tx_hash
