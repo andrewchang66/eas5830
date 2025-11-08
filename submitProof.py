@@ -40,7 +40,7 @@ def merkle_assignment():
         #  complete this method and run your code with the following line un-commented
         ###
         
-        tx_hash = send_signed_msg(proof, leaves[random_leaf_index])
+        # tx_hash = send_signed_msg(proof, leaves[random_leaf_index])
 
 
 
