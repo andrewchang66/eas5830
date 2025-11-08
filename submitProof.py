@@ -40,6 +40,8 @@ def merkle_assignment():
         # tx_hash = send_signed_msg(proof, leaves[random_leaf_index])
 
 
+
+
 def generate_primes(num_primes):
     """
         Function to generate the first 'num_primes' prime numbers
@@ -47,9 +49,30 @@ def generate_primes(num_primes):
     """
     primes_list = []
 
-    #TODO YOUR CODE HERE
+    ##### TODO YOUR CODE HERE #####
 
-    return primes_list
+    if num_primes <= 0:
+        return primes_list
+
+    import math
+    n = max(num_primes, 6)
+    limit = int(n * (math.log(n) + math.log(math.log(n)))) + 50
+    limit = max(limit, 15000)
+
+    while True:
+        sieve = bytearray(b"\x01") * (limit + 1)
+        sieve[:2] = b"\x00\x00"
+        r = int(limit ** 0.5)
+        for p in range(2, r + 1):
+            if sieve[p]:
+                start = p * p
+                sieve[start:limit + 1:p] = b"\x00" * (((limit - start) // p) + 1)
+        primes_list = [i for i, is_p in enumerate(sieve) if is_p]
+        if len(primes_list) >= num_primes:
+            return primes_list[:num_primes]
+        limit *= 2
+
+    ##### return primes_list #####
 
 
 def convert_leaves(primes_list):
@@ -60,7 +83,14 @@ def convert_leaves(primes_list):
 
     # TODO YOUR CODE HERE
 
-    return []
+    leaves = []
+    for p in primes_list:
+        # Convert integer -> fixed-width 32-byte big-endian form, then keccak it.
+        # (OpenZeppelin Merkle expects bytes32 leaves; we store keccak(bytes) as the leaf.)
+        prime_bytes = int.to_bytes(p, 32, byteorder="big")
+        leaf = Web3.keccak(prime_bytes)
+        leaves.append(leaf)
+    return leaves
 
 
 def build_merkle(leaves):
@@ -72,9 +102,28 @@ def build_merkle(leaves):
     """
 
     #TODO YOUR CODE HERE
-    tree = []
+    if not leaves:
+        return []
 
-    return tree
+    # Ensure all leaves are bytes32-like
+    levels = [list(leaves)]
+    while len(levels[-1]) > 1:
+        cur = levels[-1]
+        # duplicate last if odd number of nodes
+        if len(cur) % 2 == 1:
+            cur = cur + [cur[-1]]
+
+        nxt = []
+        for i in range(0, len(cur), 2):
+            a, b = cur[i], cur[i+1]
+            # Sorted-pair hashing exactly like OpenZeppelin (_hashPair)
+            if a < b:
+                h = Web3.solidity_keccak(['bytes32', 'bytes32'], [a, b])
+            else:
+                h = Web3.solidity_keccak(['bytes32', 'bytes32'], [b, a])
+            nxt.append(h)
+        levels.append(nxt)
+    return levels
 
 
 def prove_merkle(merkle_tree, random_indx):
@@ -87,6 +136,23 @@ def prove_merkle(merkle_tree, random_indx):
     merkle_proof = []
     # TODO YOUR CODE HERE
 
+    if not merkle_tree or random_indx is None:
+        return merkle_proof
+
+    idx = int(random_indx)
+    # For each level up to (but not including) the root
+    for level in merkle_tree[:-1]:
+        # If the level had been odd-length, the last node was duplicated.
+        # Sibling is idx^1 when pairing in [0,1], [2,3], ...
+        if len(level) == 1:
+            break
+        # If odd count, treat as duplicated last element for sibling when needed
+        last_index = len(level) - 1
+        sib = idx ^ 1
+        if sib > last_index:
+            sib = last_index  # duplicate last as sibling
+        merkle_proof.append(level[sib])
+        idx = idx // 2
     return merkle_proof
 
 
@@ -104,8 +170,19 @@ def sign_challenge(challenge):
     eth_sk = acct.key
 
     # TODO YOUR CODE HERE
-    eth_sig_obj = 'placeholder'
 
+    from eth_account.messages import encode_defunct
+
+    sk_path = Path("sk.txt")
+    priv = sk_path.read_text().strip()
+    if priv.startswith("0x") or priv.startswith("0X"):
+        priv = priv[2:]
+
+    message = encode_defunct(text=challenge)
+
+    ##
+    
+    eth_sig_obj = eth_account.Account.sign_message(message, private_key=acct.key)
     return addr, eth_sig_obj.signature.hex()
 
 
@@ -122,7 +199,58 @@ def send_signed_msg(proof, random_leaf):
     w3 = connect_to(chain)
 
     # TODO YOUR CODE HERE
-    tx_hash = 'placeholder'
+    # Load contract info
+    with open("contract_info.json", "r") as f:
+        ci = json.load(f)
+    net = ci["bsc"]
+    contract_address = Web3.to_checksum_address(net["address"])
+    abi = net["abi"]
+
+    # Connect to BNB Testnet RPC (you can swap this for your own provider URL)
+    # Common public endpoint; replace with your own reliable node if needed.
+    rpc_url = "https://data-seed-prebsc-1-s1.binance.org:8545"
+    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
+    # Inject POA middleware for BSC testnet
+    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+
+    assert w3.is_connected(), "Failed to connect to BSC testnet RPC"
+
+    # Prepare signer
+    sk_path = Path("sk.txt")
+    priv_hex = sk_path.read_text().strip()
+    acct = eth_account.Account.from_key(priv_hex)
+    sender = acct.address
+
+    # Instantiate contract
+    contract = w3.eth.contract(address=contract_address, abi=abi)
+
+    # Ensure types are correct: proof is list[bytes32], random_leaf is bytes32
+    # Build transaction
+    tx = contract.functions.submit(proof, random_leaf).build_transaction({
+        "from": sender,
+        "nonce": w3.eth.get_transaction_count(sender),
+        "chainId": 97,  # BSC Testnet
+        # Let node estimate gas & price
+        "gas": w3.eth.estimate_gas({
+            "from": sender,
+            "to": contract_address,
+            "data": contract.encode_abi(fn_name="submit", args=[proof, random_leaf]),
+        }),
+        "maxFeePerGas": w3.eth.max_priority_fee + w3.eth.generate_gas_price() if hasattr(w3.eth, "max_priority_fee") else None,
+        "maxPriorityFeePerGas": getattr(w3.eth, "max_priority_fee", lambda: None)(),
+        # Fallback (for legacy networks): if EIP-1559 fields are None, set legacy gasPrice.
+        "gasPrice": w3.eth.gas_price,
+    })
+
+    # Clean up fields for EIP-1559 vs legacy depending on node support
+    # If node doesn't support EIP-1559, remove 'maxFeePerGas'/'maxPriorityFeePerGas'
+    if "maxFeePerGas" in tx and tx["maxFeePerGas"] is None:
+        tx.pop("maxFeePerGas", None)
+    if "maxPriorityFeePerGas" in tx and tx["maxPriorityFeePerGas"] is None:
+        tx.pop("maxPriorityFeePerGas", None)
+
+    signed = acct.sign_transaction(tx)
+    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction).hex()
 
     return tx_hash
 
