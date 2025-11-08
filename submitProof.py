@@ -111,12 +111,14 @@ def build_merkle(leaves):
     tree = [list(leaves)]
     while len(tree[-1]) > 1:
         cur = tree[-1]
-        if len(cur) % 2 == 1:
-            cur = cur + [cur[-1]]
         nxt = []
-        for i in range(0, len(cur), 2):
+        # hash pairs
+        for i in range(0, len(cur) - 1, 2):
             a, b = cur[i], cur[i+1]
             nxt.append(hash_pair(a, b))
+        # if odd, carry the last element up unchanged
+        if len(cur) % 2 == 1:
+            nxt.append(cur[-1])
         tree.append(nxt)
 
     return tree
@@ -137,12 +139,16 @@ def prove_merkle(merkle_tree, random_indx):
 
     idx = int(random_indx)
     for level in merkle_tree[:-1]:
-        if len(level) == 1:
+        level_len = len(level)
+        if level_len == 1:
             break
-        last_ix = len(level) - 1
+        is_odd_last = (level_len % 2 == 1) and (idx == level_len - 1)
+        if is_odd_last:
+            # no sibling at this level; carry up
+            idx = level_len // 2
+            continue
+        # otherwise there is a sibling
         sib = idx ^ 1
-        if sib > last_ix:
-            sib = last_ix
         merkle_proof.append(level[sib])
         idx //= 2
 
@@ -192,58 +198,25 @@ def send_signed_msg(proof, random_leaf):
     w3 = connect_to(chain)
 
     # TODO YOUR CODE HERE
-    # Load contract info
-    with open("contract_info.json", "r") as f:
-        ci = json.load(f)
-    net = ci["bsc"]
-    contract_address = Web3.to_checksum_address(net["address"])
-    abi = net["abi"]
-
-    # Connect to BNB Testnet RPC (you can swap this for your own provider URL)
-    # Common public endpoint; replace with your own reliable node if needed.
-    rpc_url = "https://data-seed-prebsc-1-s1.binance.org:8545"
-    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 60}))
-    # Inject POA middleware for BSC testnet
-    w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-
-    assert w3.is_connected(), "Failed to connect to BSC testnet RPC"
-
-    # Prepare signer
-    sk_path = Path("sk.txt")
-    priv_hex = sk_path.read_text().strip()
-    acct = eth_account.Account.from_key(priv_hex)
+    contract = w3.eth.contract(address=Web3.to_checksum_address(address), abi=abi)
     sender = acct.address
 
-    # Instantiate contract
-    contract = w3.eth.contract(address=contract_address, abi=abi)
+    # Estimate gas directly from the function (avoid encode_abi quirks)
+    try:
+        gas_est = contract.functions.submit(proof, random_leaf).estimate_gas({'from': sender})
+    except Exception:
+        gas_est = 250000  # fallback
 
-    # Ensure types are correct: proof is list[bytes32], random_leaf is bytes32
-    # Build transaction
     tx = contract.functions.submit(proof, random_leaf).build_transaction({
         "from": sender,
         "nonce": w3.eth.get_transaction_count(sender),
-        "chainId": 97,  # BSC Testnet
-        # Let node estimate gas & price
-        "gas": w3.eth.estimate_gas({
-            "from": sender,
-            "to": contract_address,
-            "data": contract.encode_abi(fn_name="submit", args=[proof, random_leaf]),
-        }),
-        "maxFeePerGas": w3.eth.max_priority_fee + w3.eth.generate_gas_price() if hasattr(w3.eth, "max_priority_fee") else None,
-        "maxPriorityFeePerGas": getattr(w3.eth, "max_priority_fee", lambda: None)(),
-        # Fallback (for legacy networks): if EIP-1559 fields are None, set legacy gasPrice.
+        "chainId": 97,  # BSC testnet
         "gasPrice": w3.eth.gas_price,
+        "gas": gas_est,
     })
-
-    # Clean up fields for EIP-1559 vs legacy depending on node support
-    # If node doesn't support EIP-1559, remove 'maxFeePerGas'/'maxPriorityFeePerGas'
-    if "maxFeePerGas" in tx and tx["maxFeePerGas"] is None:
-        tx.pop("maxFeePerGas", None)
-    if "maxPriorityFeePerGas" in tx and tx["maxPriorityFeePerGas"] is None:
-        tx.pop("maxPriorityFeePerGas", None)
-
     signed = acct.sign_transaction(tx)
-    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction).hex()
+    tx_hash_bytes = w3.eth.send_raw_transaction(signed.rawTransaction)
+    tx_hash = tx_hash_bytes.hex()
 
     return tx_hash
 
