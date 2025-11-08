@@ -88,11 +88,8 @@ def convert_leaves(primes_list):
 
     leaves = []
     for p in primes_list:
-        # Convert integer -> fixed-width 32-byte big-endian form, then keccak it.
-        # (OpenZeppelin Merkle expects bytes32 leaves; we store keccak(bytes) as the leaf.)
-        prime_bytes = int.to_bytes(p, 32, byteorder="big")
-        leaf = Web3.keccak(prime_bytes)
-        leaves.append(leaf)
+        prime_bytes32 = int.to_bytes(p, 32, byteorder="big")
+        leaves.append(prime_bytes32)
     return leaves
 
 
@@ -112,11 +109,9 @@ def build_merkle(leaves):
     while len(tree[-1]) > 1:
         cur = tree[-1]
         nxt = []
-        # hash pairs
         for i in range(0, len(cur) - 1, 2):
             a, b = cur[i], cur[i+1]
             nxt.append(hash_pair(a, b))
-        # if odd, carry the last element up unchanged
         if len(cur) % 2 == 1:
             nxt.append(cur[-1])
         tree.append(nxt)
@@ -133,21 +128,18 @@ def prove_merkle(merkle_tree, random_indx):
     """
     merkle_proof = []
     # TODO YOUR CODE HERE
-
     if not merkle_tree or random_indx is None:
         return merkle_proof
 
     idx = int(random_indx)
     for level in merkle_tree[:-1]:
-        level_len = len(level)
-        if level_len == 1:
+        L = len(level)
+        if L == 1:
             break
-        is_odd_last = (level_len % 2 == 1) and (idx == level_len - 1)
-        if is_odd_last:
-            # no sibling at this level; carry up
-            idx = level_len // 2
+        odd_last = (L % 2 == 1) and (idx == L - 1)
+        if odd_last:
+            idx = L // 2
             continue
-        # otherwise there is a sibling
         sib = idx ^ 1
         merkle_proof.append(level[sib])
         idx //= 2
@@ -171,17 +163,9 @@ def sign_challenge(challenge):
     # TODO YOUR CODE HERE
 
     from eth_account.messages import encode_defunct
-
-    sk_path = Path("sk.txt")
-    priv = sk_path.read_text().strip()
-    if priv.startswith("0x") or priv.startswith("0X"):
-        priv = priv[2:]
-
     message = encode_defunct(text=challenge)
+    eth_sig_obj = eth_account.Account.sign_message(message, private_key=eth_sk)
 
-    ##
-    
-    eth_sig_obj = eth_account.Account.sign_message(message, private_key=acct.key)
     return addr, eth_sig_obj.signature.hex()
 
 
@@ -201,16 +185,15 @@ def send_signed_msg(proof, random_leaf):
     contract = w3.eth.contract(address=Web3.to_checksum_address(address), abi=abi)
     sender = acct.address
 
-    # Estimate gas directly from the function (avoid encode_abi quirks)
     try:
         gas_est = contract.functions.submit(proof, random_leaf).estimate_gas({'from': sender})
     except Exception:
-        gas_est = 250000  # fallback
+        gas_est = 250000
 
     tx = contract.functions.submit(proof, random_leaf).build_transaction({
         "from": sender,
         "nonce": w3.eth.get_transaction_count(sender),
-        "chainId": 97,  # BSC testnet
+        "chainId": 97,
         "gasPrice": w3.eth.gas_price,
         "gas": gas_est,
     })
