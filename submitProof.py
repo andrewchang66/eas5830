@@ -105,25 +105,18 @@ def build_merkle(leaves):
     if not leaves:
         return []
 
-    # Ensure all leaves are bytes32-like
-    levels = [list(leaves)]
-    while len(levels[-1]) > 1:
-        cur = levels[-1]
-        # duplicate last if odd number of nodes
+    tree = [list(leaves)]
+    while len(tree[-1]) > 1:
+        cur = tree[-1]
         if len(cur) % 2 == 1:
             cur = cur + [cur[-1]]
-
         nxt = []
         for i in range(0, len(cur), 2):
             a, b = cur[i], cur[i+1]
-            # Sorted-pair hashing exactly like OpenZeppelin (_hashPair)
-            if a < b:
-                h = Web3.solidity_keccak(['bytes32', 'bytes32'], [a, b])
-            else:
-                h = Web3.solidity_keccak(['bytes32', 'bytes32'], [b, a])
-            nxt.append(h)
-        levels.append(nxt)
-    return levels
+            nxt.append(hash_pair(a, b))
+        tree.append(nxt)
+
+    return tree
 
 
 def prove_merkle(merkle_tree, random_indx):
@@ -140,19 +133,16 @@ def prove_merkle(merkle_tree, random_indx):
         return merkle_proof
 
     idx = int(random_indx)
-    # For each level up to (but not including) the root
     for level in merkle_tree[:-1]:
-        # If the level had been odd-length, the last node was duplicated.
-        # Sibling is idx^1 when pairing in [0,1], [2,3], ...
         if len(level) == 1:
             break
-        # If odd count, treat as duplicated last element for sibling when needed
-        last_index = len(level) - 1
+        last_ix = len(level) - 1
         sib = idx ^ 1
-        if sib > last_index:
-            sib = last_index  # duplicate last as sibling
+        if sib > last_ix:
+            sib = last_ix
         merkle_proof.append(level[sib])
-        idx = idx // 2
+        idx //= 2
+
     return merkle_proof
 
 
