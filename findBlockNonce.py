@@ -18,7 +18,36 @@ def mine_block(k, prev_hash, transactions):
         print("mine_block expects positive integer")
         return b'\x00'
 
-    # TODO your code to find a nonce here
+    ##### TODO your code to find a nonce here
+    
+    # Precompute the constant prefix: prev_hash followed by all transactions (as UTF-8 bytes) in order
+    assert isinstance(prev_hash, (bytes, bytearray)), 'prev_hash must be bytes'
+    assert isinstance(transactions, list), 'transactions must be a list of strings'
+    prefix_bytes = prev_hash + b''.join([t.encode('utf-8') for t in transactions])
+
+    # Brute-force search for a nonce (as ASCII-encoded decimal) such that
+    # SHA256(prefix_bytes + nonce).digest() has at least k trailing zero *bits*.
+    i = 0
+    while True:
+        nonce = str(i).encode('utf-8')  # nonce must be bytes
+        digest = hashlib.sha256(prefix_bytes + nonce).digest()
+
+        # Count trailing zero bits (LSBs) in the digest, scanning from the last byte backwards
+        tz = 0
+        for b in reversed(digest):
+            if b == 0:
+                tz += 8
+                continue
+            # Add number of trailing zeros in this non-zero byte using bit trick: (b & -b)
+            tz += ((b & -b).bit_length() - 1)
+            break
+        
+        if tz >= k:
+            break
+        i += 1
+
+    #####
+    
 
     assert isinstance(nonce, bytes), 'nonce should be of type bytes'
     return nonce
