@@ -24,46 +24,38 @@ contract Destination is AccessControl {
 
 	function wrap(address _underlying_token, address _recipient, uint256 _amount ) public onlyRole(WARDEN_ROLE) {
 		//YOUR CODE HERE
-		address wrapped = wrappedOf[underlying];
-    require(wrapped != address(0), "token not registered"); // must be created first
-    require(to != address(0), "bad recipient");
-    require(amount > 0, "zero amount");
-
-    // Mint wrapped tokens to recipient
-    IBridgeToken(wrapped).mint(to, amount);
-    emit Wrap(underlying, to, amount);
+	    address _wrapped = wrapped[_underlying];
+	    require(_wrapped != address(0), "token not registered");
+	    require(_to != address(0), "bad recipient");
+	    require(_amount > 0, "zero amount");
+	
+	    BridgeToken(_wrapped).mint(_to, _amount);
+	    emit Wrap(_underlying, _to, _amount);
 	}
 
 	function unwrap(address _wrapped_token, address _recipient, uint256 _amount ) public {
 		//YOUR CODE HERE
-		require(wrappedToken != address(0), "bad wrapped token");
-    require(recipientOnSource != address(0), "bad source recipient");
-    require(amount > 0, "zero amount");
-
-    // User must own enough wrapped tokens on destination
-    require(IBridgeToken(wrappedToken).balanceOf(msg.sender) >= amount, "insufficient balance");
-
-    // Burn user's wrapped tokens; Destination (this contract) is authorized to burn
-    IBridgeToken(wrappedToken).burnFrom(msg.sender, amount);
-
-    // Emit event so the relayer can call withdraw on source side to send real tokens to recipientOnSource
-    emit Unwrap(wrappedToken, recipientOnSource, amount);
+	    require(_wrappedToken != address(0), "bad wrapped token");
+	    require(_recipientOnSource != address(0), "bad source recipient");
+	    require(_amount > 0, "zero amount");
+	
+	    BridgeToken(_wrappedToken).burnFrom(msg.sender, _amount);
+	
+	    emit Unwrap(_wrappedToken, _recipientOnSource, _amount);
 	}
 
 	function createToken(address _underlying_token, string memory name, string memory symbol ) public onlyRole(CREATOR_ROLE) returns(address) {
 		//YOUR CODE HERE
-		require(underlying != address(0), "invalid underlying");
-    require(wrappedOf[underlying] == address(0), "already created");
+    	require(_underlying != address(0), "invalid underlying");
+    	require(wrapped[_underlying] == address(0), "already created");
 
-    // Deploy the wrapped token.
-    BridgeToken token = new BridgeToken(name, symbol, underlying);
-    wrapped = address(token);
+    	BridgeToken token = new BridgeToken(_name, _symbol);
+    	address _wrapped = address(token);
 
-    // Record mapping and emit event
-    wrappedOf[underlying] = wrapped;
-    emit Creation(underlying, wrapped);
+    	wrapped[_underlying] = _wrapped;
+    	emit Creation(_underlying, _wrapped);
+    	return _wrapped;
 
-    return wrapped;
 	}
 
 }
