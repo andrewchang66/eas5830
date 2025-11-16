@@ -23,14 +23,43 @@ contract Source is AccessControl {
 
 	function deposit(address _token, address _recipient, uint256 _amount ) public {
 		//YOUR CODE HERE
+
+    require(approved[_token], "token not approved");
+    require(_recipient != address(0), "bad recipient");
+    require(_amount > 0, "zero amount");
+
+    // User must have approved this contract for _amount
+    bool ok = ERC20(_token).transferFrom(msg.sender, address(this), _amount);
+    require(ok, "transferFrom failed");
+
+    // Emit (token, recipient, amount) per your event definition
+    emit Deposit(_token, _recipient, _amount);
+
 	}
 
 	function withdraw(address _token, address _recipient, uint256 _amount ) onlyRole(WARDEN_ROLE) public {
 		//YOUR CODE HERE
+
+    require(_recipient != address(0), "bad recipient");
+    require(_amount > 0, "zero amount");
+
+    bool ok = ERC20(_token).transfer(_recipient, _amount);
+    require(ok, "transfer failed");
+
+    emit Withdrawal(_token, _recipient, _amount);
 	}
 
 	function registerToken(address _token) onlyRole(ADMIN_ROLE) public {
 		//YOUR CODE HERE
+
+    require(_token != address(0), "invalid token");
+    require(!approved[_token], "already registered");
+
+    approved[_token] = true;
+    tokens.push(_token);
+
+    emit Registration(_token);
+	
 	}
 
 
