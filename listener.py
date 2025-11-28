@@ -55,9 +55,46 @@ def scan_blocks(chain, start_block, end_block, contract_address, eventfile='depo
         events = event_filter.get_all_entries()
         #print( f"Got {len(events)} entries for block {block_num}" )
         # TODO YOUR CODE HERE
+        rows = []
+        for ev in events:
+            rows.append({
+                "chain": chain,
+                "token": ev.args["token"],
+                "recipient": ev.args["recipient"],
+                "amount": int(ev.args["amount"]),
+                "transactionHash": ev.transactionHash.hex(),
+                "address": ev.address,
+            })
+
+        if rows:
+            df = pd.DataFrame(rows)
+            path = Path(eventfile)
+            if path.exists():
+                df.to_csv(path, mode="a", header=False, index=False)
+            else:
+                df.to_csv(path, index=False)
+		######
     else:
         for block_num in range(start_block,end_block+1):
             event_filter = contract.events.Deposit.create_filter(from_block=block_num,to_block=block_num,argument_filters=arg_filter)
             events = event_filter.get_all_entries()
             #print( f"Got {len(events)} entries for block {block_num}" )
             # TODO YOUR CODE HERE
+            rows = []
+            for ev in events:
+                rows.append({
+                    "chain": chain,
+                    "token": ev.args["token"],
+                    "recipient": ev.args["recipient"],
+                    "amount": int(ev.args["amount"]),
+                    "transactionHash": ev.transactionHash.hex(),
+                    "address": ev.address,
+                })
+
+            if rows:
+                df = pd.DataFrame(rows)
+                path = Path(eventfile)
+                if path.exists():
+                    df.to_csv(path, mode="a", header=False, index=False)
+                else:
+                    df.to_csv(path, index=False)
