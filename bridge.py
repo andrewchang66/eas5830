@@ -56,7 +56,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     info_dest   = get_contract_info("destination", contract_info)
 
     # Load warden private key
-    warden_key = "0xb2567941b5da28eef618f671b105053fc2950928e0439a9eb7d6993e8adf3830"
+    warden_key = info_source["private_key"]
 
     # Connect to both chains
     w3_src = connect_to("source")       # Avalanche Fuji
