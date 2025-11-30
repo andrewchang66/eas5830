@@ -49,17 +49,19 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print( f"Invalid chain: {chain}" )
         return 0
     
-        ##### YOUR CODE HERE #####
-           
-    # Load contract info for both chains
-    info_key    = get_contract_info("private_key", contract_info)
-    info_source = get_contract_info("source", contract_info)
-    info_dest   = get_contract_info("destination", contract_info)
+    ##### YOUR CODE HERE #####
 
-    # Load warden private key (stored under source in contract_info.json)
-    warden_key = info_key
+    # Load full config
+    with open(contract_info, "r") as f:
+        all_info = json.load(f)
 
-    # Connect to both chains
+    warden_key = all_info["private_key"]
+
+    # Source & Destination contract sections
+    info_source = all_info["source"]
+    info_dest   = all_info["destination"]
+
+    # Connect to both networks
     w3_src = connect_to("source")       # Avalanche Fuji
     w3_dst = connect_to("destination")  # BSC Testnet
 
@@ -74,19 +76,20 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         abi=info_dest["abi"]
     )
 
-    # Warden accounts on both chains
+    # Build warden accounts
     acct_src = w3_src.eth.account.from_key(warden_key)
     acct_dst = w3_dst.eth.account.from_key(warden_key)
 
-    # Determine block ranges (last 5 blocks)
+    # Block ranges
     latest_src = w3_src.eth.block_number
     latest_dst = w3_dst.eth.block_number
 
     start_src = max(0, latest_src - 5)
     start_dst = max(0, latest_dst - 5)
 
-    # If chain == "source": handle Deposit → wrap on BSC
-
+    # -----------------------------------------------------
+    # SOURCE SIDE — look for Deposit → call wrap on BSC
+    # -----------------------------------------------------
     if chain == "source":
         print(f"Scanning SOURCE chain (Avalanche Fuji) blocks {start_src} → {latest_src}")
 
@@ -106,10 +109,11 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             amount    = ev["args"]["amount"]
 
             print(f"Found Deposit: token={token}, recipient={recipient}, amount={amount}")
-            print("Calling wrap() on destination (BSC)…")
+            print("Calling wrap() on BSC Testnet…")
 
             try:
                 nonce = w3_dst.eth.get_transaction_count(acct_dst.address)
+
                 tx = dst_contract.functions.wrap(
                     Web3.to_checksum_address(token),
                     Web3.to_checksum_address(recipient),
@@ -121,20 +125,20 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                     "chainId": w3_dst.eth.chain_id,
                 })
 
-                # Estimate gas
                 tx["gas"] = w3_dst.eth.estimate_gas(tx)
-
                 signed = acct_dst.sign_transaction(tx)
                 tx_hash = w3_dst.eth.send_raw_transaction(signed.rawTransaction)
-                print("Sent wrap() tx:", tx_hash.hex())
+
+                print("wrap() tx sent:", tx_hash.hex())
 
             except Exception as e:
                 print("wrap() call failed:", e)
 
         return 1
 
-    # If chain == "destination": handle Unwrap → withdraw on Avax
-
+    # -----------------------------------------------------
+    # DESTINATION SIDE — look for Unwrap → call withdraw
+    # -----------------------------------------------------
     if chain == "destination":
         print(f"Scanning DESTINATION chain (BSC Testnet) blocks {start_dst} → {latest_dst}")
 
@@ -149,16 +153,16 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             return 0
 
         for ev in events:
-            # Event arg names depend on your Solidity definition; supporting common variants:
-            underlying = ev["args"].get("underlying_token") or ev["args"].get("underlying")
-            recipient  = ev["args"].get("to")  # recipient on source chain
+            underlying = ev["args"]["underlying_token"]
+            recipient  = ev["args"]["to"]
             amount     = ev["args"]["amount"]
 
-            print(f"Found Unwrap: underlying={underlying}, to={recipient}, amount={amount}")
-            print("Calling withdraw() on source (Avalanche)…")
+            print(f"Found Unwrap: underlying={underlying}, recipient={recipient}, amount={amount}")
+            print("Calling withdraw() on Avalanche…")
 
             try:
                 nonce = w3_src.eth.get_transaction_count(acct_src.address)
+
                 tx = src_contract.functions.withdraw(
                     Web3.to_checksum_address(underlying),
                     Web3.to_checksum_address(recipient),
@@ -171,16 +175,12 @@ def scan_blocks(chain, contract_info="contract_info.json"):
                 })
 
                 tx["gas"] = w3_src.eth.estimate_gas(tx)
-
                 signed = acct_src.sign_transaction(tx)
                 tx_hash = w3_src.eth.send_raw_transaction(signed.rawTransaction)
-                print("Sent withdraw() tx:", tx_hash.hex())
+
+                print("withdraw() tx sent:", tx_hash.hex())
 
             except Exception as e:
                 print("withdraw() call failed:", e)
 
         return 1
-
-        ###########
-
-    
