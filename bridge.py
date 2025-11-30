@@ -51,18 +51,18 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     
     ##### YOUR CODE HERE #####
 
-    # 1. 設定 warden 
+    # 1. 設定 warden 私鑰（同時在 Source / Destination 合約上擁有 WARDEN_ROLE）
     WARDEN_PRIVATE_KEY = "0xb2567941b5da28eef618f671b105053fc2950928e0439a9eb7d6993e8adf3830"
 
-    # 小 helper：從私鑰算出 warden address
+    # helper：從私鑰算 address
     def get_warden_address(w3):
         acct = w3.eth.account.from_key(WARDEN_PRIVATE_KEY)
         return acct.address
 
-    # 小 helper：用 warden 私鑰送交易
+    # helper：用 warden 私鑰送交易
     def send_tx(w3, fn):
         """
-        fn: 合約函式，例如 contract.functions.wrap(...) / withdraw(...)
+        fn: 合約函式物件，例如 contract.functions.wrap(...) / withdraw(...)
         """
         warden_addr = get_warden_address(w3)
         nonce = w3.eth.get_transaction_count(warden_addr)
@@ -87,7 +87,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print("  → sent tx:", tx_hash.hex())
         return tx_hash
 
-    # 2. 連線到 source / destination 兩條鏈
+    # 2. 連線兩條鏈
     w3_source = connect_to('source')
     w3_destination = connect_to('destination')
 
@@ -95,7 +95,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print("Failed to connect to RPCs")
         return 0
 
-    # 3. 讀 contract_info.json 拿地址與 ABI
+    # 3. 從 contract_info.json 拿到合約地址 & ABI
     src_info = get_contract_info('source', contract_info)
     dst_info = get_contract_info('destination', contract_info)
 
@@ -111,7 +111,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     src_contract = w3_source.eth.contract(address=src_addr, abi=src_abi)
     dst_contract = w3_destination.eth.contract(address=dst_addr, abi=dst_abi)
 
-    # 4. 抓兩條鏈的最新 block，向前掃最後 5 個 block
+    # 4. 取兩條鏈的最新 block，向前掃最後 5 個 block
     latest_src_block = w3_source.eth.block_number
     latest_dst_block = w3_destination.eth.block_number
 
@@ -119,40 +119,39 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     from_dst_block = max(0, latest_dst_block - 4)
 
     # =========================================================
-    # A. Source 鏈：Deposit → Destination 鏈呼叫 wrap()
+    # A. Source 鏈：Deposit → Destination.wrap
     # =========================================================
     try:
-        # Source.sol: event Deposit( address indexed token, address indexed recipient, uint256 amount );
-        deposit_event = src_contract.events.Deposit
-        deposit_logs = deposit_event.get_logs(
+        # 用 create_filter / get_all_entries（Bridge IV style）
+        deposit_filter = src_contract.events.Deposit.create_filter(
             from_block=from_src_block,
-            to_block=latest_src_block
+            to_block=latest_src_block,
+            argument_filters={}
         )
+        deposit_events = deposit_filter.get_all_entries()
     except Exception as e:
         print("Error fetching Deposit events:", e)
-        deposit_logs = []
+        deposit_events = []
 
-    if len(deposit_logs) > 0:
+    if len(deposit_events) > 0:
         print(
-            f"Found {len(deposit_logs)} Deposit event(s) on source "
-            f"(blocks {from_src_block}–{latest_src_block})"
+            f"Found {len(deposit_events)} Deposit event(s) on source "
+            f"(blocks {from_src_block}-{latest_src_block})"
         )
 
-    for log in deposit_logs:
-        args = log["args"]
+    for ev in deposit_events:
         try:
-            token     = args["token"]
-            recipient = args["recipient"]
-            amount    = args["amount"]
-        except KeyError as e:
-            print("Deposit event args mismatch, missing:", e)
+            token     = ev.args["token"]
+            recipient = ev.args["recipient"]
+            amount    = int(ev.args["amount"])
+        except Exception as e:
+            print("Deposit event args mismatch:", e)
             continue
 
         print(f"Processing Deposit: token={token}, recipient={recipient}, amount={amount}")
 
         try:
-            # Destination.wrap:
-            # function wrap(address _underlying_token, address _recipient, uint256 _amount )
+            # Destination.wrap(address _underlying_token, address _recipient, uint256 _amount)
             fn_wrap = dst_contract.functions.wrap(token, recipient, amount)
         except Exception as e:
             print("Error building wrap() call:", e)
@@ -164,42 +163,34 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             print("Error sending wrap() tx:", e)
 
     # =========================================================
-    # B. Destination 鏈：Unwrap → Source 鏈呼叫 withdraw()
+    # B. Destination 鏈：Unwrap → Source.withdraw
     # =========================================================
     try:
-        # Destination.sol:
-        # event Unwrap(
-        #   address indexed underlying_token,
-        #   address indexed wrapped_token,
-        #   address frm,
-        #   address indexed to,
-        #   uint256 amount
-        # );
-        unwrap_event = dst_contract.events.Unwrap
-        unwrap_logs = unwrap_event.get_logs(
+        unwrap_filter = dst_contract.events.Unwrap.create_filter(
             from_block=from_dst_block,
-            to_block=latest_dst_block
+            to_block=latest_dst_block,
+            argument_filters={}
         )
+        unwrap_events = unwrap_filter.get_all_entries()
     except Exception as e:
         print("Error fetching Unwrap events:", e)
-        unwrap_logs = []
+        unwrap_events = []
 
-    if len(unwrap_logs) > 0:
+    if len(unwrap_events) > 0:
         print(
-            f"Found {len(unwrap_logs)} Unwrap event(s) on destination "
-            f"(blocks {from_dst_block}–{latest_dst_block})"
+            f"Found {len(unwrap_events)} Unwrap event(s) on destination "
+            f"(blocks {from_dst_block}-{latest_dst_block})"
         )
 
-    for log in unwrap_logs:
-        args = log["args"]
+    for ev in unwrap_events:
         try:
-            underlying_token = args["underlying_token"]
-            wrapped_token    = args["wrapped_token"]   # debug 用
-            frm              = args["frm"]
-            to               = args["to"]
-            amount           = args["amount"]
-        except KeyError as e:
-            print("Unwrap event args mismatch, missing:", e)
+            underlying_token = ev.args["underlying_token"]
+            wrapped_token    = ev.args["wrapped_token"]  # debug 用
+            frm              = ev.args["frm"]
+            to               = ev.args["to"]
+            amount           = int(ev.args["amount"])
+        except Exception as e:
+            print("Unwrap event args mismatch:", e)
             continue
 
         print(
@@ -208,8 +199,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         )
 
         try:
-            # Source.withdraw:
-            # function withdraw(address _token, address _recipient, uint256 _amount )
+            # Source.withdraw(address _token, address _recipient, uint256 _amount)
             fn_withdraw = src_contract.functions.withdraw(underlying_token, to, amount)
         except Exception as e:
             print("Error building withdraw() call:", e)
