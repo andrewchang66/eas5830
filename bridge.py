@@ -52,11 +52,12 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         ##### YOUR CODE HERE #####
            
     # Load contract info for both chains
+    info_key    = get_contract_info("private_key", contract_info)
     info_source = get_contract_info("source", contract_info)
     info_dest   = get_contract_info("destination", contract_info)
 
-    # Load warden private key
-    warden_key = info_source["private_key"]
+    # Load warden private key (stored under source in contract_info.json)
+    warden_key = info_key
 
     # Connect to both chains
     w3_src = connect_to("source")       # Avalanche Fuji
