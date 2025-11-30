@@ -163,35 +163,38 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     # B. 在 destination 鏈找 Unwrap → source 鏈呼叫 withdraw()
     #    這裡只掃「最後 1～2 個 blocks」，避免 BSC RPC 的 limit exceeded
     # =========================================================
+
+    # 當前最新的目的鏈區塊
     latest_dst_block = w3_destination.eth.block_number
-    # 只掃最後兩個 block，降低 getLogs 回傳過多事件的機率
-    unwrap_from_block = max(0, latest_dst_block - 1)
-    unwrap_to_block = latest_dst_block
 
+    # 我們往回掃最多 5 個區塊：latest, latest-1, ..., latest-4
+    unwrap_logs = []
     try:
-        # Destination.sol:
-        # event Unwrap(
-        #   address indexed underlying_token,
-        #   address indexed wrapped_token,
-        #   address frm,
-        #   address indexed to,
-        #   uint256 amount
-        # );
         unwrap_event = dst_contract.events.Unwrap
-        unwrap_logs = unwrap_event.get_logs(
-            from_block=unwrap_from_block,
-            to_block=unwrap_to_block
-        )
     except Exception as e:
-        print("Error fetching Unwrap events:", getattr(e, "args", e))
-        unwrap_logs = []
+        print("Error getting Unwrap event object:", e)
+        unwrap_event = None
 
-    if len(unwrap_logs) > 0:
-        print(
-            f"Found {len(unwrap_logs)} Unwrap event(s) on destination "
-            f"(blocks {unwrap_from_block}–{unwrap_to_block})"
-        )
+    if unwrap_event is not None:
+        # 從最新往回找
+        start_block = latest_dst_block
+        end_block = max(0, latest_dst_block - 4)
 
+        for b in range(start_block, end_block - 1, -1):  # 例如 100,99,98,97,96
+            try:
+                logs = unwrap_event.get_logs(from_block=b, to_block=b)
+            except Exception as e:
+                # 如果這個 block 撞到 limit 或其他錯誤，就跳過看前一個
+                print(f"Error fetching Unwrap events for block {b}: {getattr(e, 'args', e)}")
+                continue
+
+            if logs:
+                print(f"Found {len(logs)} Unwrap event(s) on destination at block {b}")
+                unwrap_logs.extend(logs)
+                # 一旦在某個 block 找到，就可以 break（避免重複處理太多不同 unwrap）
+                break
+
+    # 處理剛剛找到的 unwrap_logs
     for log in unwrap_logs:
         args = log["args"]
         try:
@@ -221,5 +224,3 @@ def scan_blocks(chain, contract_info="contract_info.json"):
             send_tx(w3_source, fn)
         except Exception as e:
             print("Error sending withdraw() tx:", e)
-
-    return 1
