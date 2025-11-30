@@ -51,13 +51,14 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     
     ##### YOUR CODE HERE #####
 
-    # Load full config
+    # Load entire contract_info.json
     with open(contract_info, "r") as f:
         all_info = json.load(f)
 
+    # Extract the private key
     warden_key = all_info["private_key"]
 
-    # Source & Destination contract sections
+    # Extract contract info sections
     info_source = all_info["source"]
     info_dest   = all_info["destination"]
 
