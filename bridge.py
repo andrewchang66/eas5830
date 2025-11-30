@@ -51,137 +51,170 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     
     ##### YOUR CODE HERE #####
 
-    # Load entire contract_info.json
-    with open(contract_info, "r") as f:
-        all_info = json.load(f)
+    # 1. 設定 warden 私鑰（
+    WARDEN_PRIVATE_KEY = "0xb2567941b5da28eef618f671b105053fc2950928e0439a9eb7d6993e8adf3830" 
 
-    # Extract the private key
-    warden_key = all_info["private_key"]
+    # 小 helper：從私鑰算出 warden address
+    def get_warden_address(w3):
+        acct = w3.eth.account.from_key(WARDEN_PRIVATE_KEY)
+        return acct.address
 
-    # Extract contract info sections
-    info_source = all_info["source"]
-    info_dest   = all_info["destination"]
+    # 小 helper：用 warden 私鑰送交易
+    def send_tx(w3, fn):
+        warden_addr = get_warden_address(w3)
+        nonce = w3.eth.get_transaction_count(warden_addr)
+        gas_price = w3.eth.gas_price
 
-    # Connect to both networks
-    w3_src = connect_to("source")       # Avalanche Fuji
-    w3_dst = connect_to("destination")  # BSC Testnet
+        tx = fn.build_transaction({
+            "from": warden_addr,
+            "nonce": nonce,
+            "gasPrice": gas_price,
+        })
 
-    # Instantiate contract objects
-    src_contract = w3_src.eth.contract(
-        address=Web3.to_checksum_address(info_source["address"]),
-        abi=info_source["abi"]
-    )
+        # 預估 gas
+        gas_estimate = w3.eth.estimate_gas(tx)
+        tx["gas"] = gas_estimate
 
-    dst_contract = w3_dst.eth.contract(
-        address=Web3.to_checksum_address(info_dest["address"]),
-        abi=info_dest["abi"]
-    )
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key=WARDEN_PRIVATE_KEY)
 
-    # Build warden accounts
-    acct_src = w3_src.eth.account.from_key(warden_key)
-    acct_dst = w3_dst.eth.account.from_key(warden_key)
+        # 兼容不同 web3 版本：可能是 rawTransaction 或 raw_transaction
+        raw_tx = getattr(signed_tx, "rawTransaction", None)
+        if raw_tx is None:
+            raw_tx = getattr(signed_tx, "raw_transaction")
 
-    # Block ranges
-    latest_src = w3_src.eth.block_number
-    latest_dst = w3_dst.eth.block_number
+        tx_hash = w3.eth.send_raw_transaction(raw_tx)
+        print("  → sent tx:", tx_hash.hex())
+        return tx_hash
 
-    start_src = max(0, latest_src - 5)
-    start_dst = max(0, latest_dst - 5)
+    # 連線到 source / destination 兩條鏈
+    w3_source = connect_to('source')
+    w3_destination = connect_to('destination')
 
-    # -----------------------------------------------------
-    # SOURCE SIDE — look for Deposit → call wrap on BSC
-    # -----------------------------------------------------
-    if chain == "source":
-        print(f"Scanning SOURCE chain (Avalanche Fuji) blocks {start_src} → {latest_src}")
+    if (not w3_source.is_connected()) or (not w3_destination.is_connected()):
+        print("Failed to connect to RPCs")
+        return 0
+
+    # 5. 讀 contract_info.json 拿地址與 ABI
+    src_info = get_contract_info('source', contract_info)
+    dst_info = get_contract_info('destination', contract_info)
+
+    try:
+        src_addr = Web3.to_checksum_address(src_info["address"])
+        dst_addr = Web3.to_checksum_address(dst_info["address"])
+        src_abi  = src_info["abi"]
+        dst_abi  = dst_info["abi"]
+    except Exception as e:
+        print("Error parsing contract_info.json:", e)
+        return 0
+
+    src_contract = w3_source.eth.contract(address=src_addr, abi=src_abi)
+    dst_contract = w3_destination.eth.contract(address=dst_addr, abi=dst_abi)
+
+    # 掃「最後 5 個 blocks」
+    latest_src_block = w3_source.eth.block_number
+    latest_dst_block = w3_destination.eth.block_number
+
+    from_src_block = max(0, latest_src_block - 4)
+    from_dst_block = max(0, latest_dst_block - 4)
+
+    # 在 source 鏈找 Deposit → destination 鏈呼叫 wrap()
+    try:
+        # Source.sol: event Deposit( address indexed token, address indexed recipient, uint256 amount );
+        deposit_event = src_contract.events.Deposit
+        deposit_logs = deposit_event.get_logs(
+            from_block=from_src_block,
+            to_block=latest_src_block
+        )
+    except Exception as e:
+        print("Error fetching Deposit events:", e)
+        deposit_logs = []
+
+    if len(deposit_logs) > 0:
+        print(
+            f"Found {len(deposit_logs)} Deposit event(s) on source "
+            f"(blocks {from_src_block}–{latest_src_block})"
+        )
+
+    for log in deposit_logs:
+        args = log["args"]
+        try:
+            token     = args["token"]
+            recipient = args["recipient"]
+            amount    = args["amount"]
+        except KeyError as e:
+            print("Deposit event args mismatch, missing:", e)
+            continue
+
+        print(f"Processing Deposit: token={token}, recipient={recipient}, amount={amount}")
 
         try:
-            deposit_filter = src_contract.events.Deposit.create_filter(
-                fromBlock=start_src,
-                toBlock=latest_src
-            )
-            events = deposit_filter.get_all_entries()
+            # Destination.wrap:
+            # function wrap(address _underlying_token, address _recipient, uint256 _amount ) public onlyRole(WARDEN_ROLE)
+            fn = dst_contract.functions.wrap(token, recipient, amount)
         except Exception as e:
-            print("Error creating Deposit filter:", e)
-            return 0
-
-        for ev in events:
-            token     = ev["args"]["token"]
-            recipient = ev["args"]["recipient"]
-            amount    = ev["args"]["amount"]
-
-            print(f"Found Deposit: token={token}, recipient={recipient}, amount={amount}")
-            print("Calling wrap() on BSC Testnet…")
-
-            try:
-                nonce = w3_dst.eth.get_transaction_count(acct_dst.address)
-
-                tx = dst_contract.functions.wrap(
-                    Web3.to_checksum_address(token),
-                    Web3.to_checksum_address(recipient),
-                    int(amount)
-                ).build_transaction({
-                    "from": acct_dst.address,
-                    "nonce": nonce,
-                    "gasPrice": w3_dst.eth.gas_price,
-                    "chainId": w3_dst.eth.chain_id,
-                })
-
-                tx["gas"] = w3_dst.eth.estimate_gas(tx)
-                signed = acct_dst.sign_transaction(tx)
-                tx_hash = w3_dst.eth.send_raw_transaction(signed.rawTransaction)
-
-                print("wrap() tx sent:", tx_hash.hex())
-
-            except Exception as e:
-                print("wrap() call failed:", e)
-
-        return 1
-
-    # -----------------------------------------------------
-    # DESTINATION SIDE — look for Unwrap → call withdraw
-    # -----------------------------------------------------
-    if chain == "destination":
-        print(f"Scanning DESTINATION chain (BSC Testnet) blocks {start_dst} → {latest_dst}")
+            print("Error building wrap() call:", e)
+            continue
 
         try:
-            unwrap_filter = dst_contract.events.Unwrap.create_filter(
-                fromBlock=start_dst,
-                toBlock=latest_dst
-            )
-            events = unwrap_filter.get_all_entries()
+            send_tx(w3_destination, fn)
         except Exception as e:
-            print("Error creating Unwrap filter:", e)
-            return 0
+            print("Error sending wrap() tx:", e)
 
-        for ev in events:
-            underlying = ev["args"]["underlying_token"]
-            recipient  = ev["args"]["to"]
-            amount     = ev["args"]["amount"]
 
-            print(f"Found Unwrap: underlying={underlying}, recipient={recipient}, amount={amount}")
-            print("Calling withdraw() on Avalanche…")
+    # 在 destination 鏈找 Unwrap → source 鏈呼叫 withdraw()
 
-            try:
-                nonce = w3_src.eth.get_transaction_count(acct_src.address)
+    try:
+        # Destination.sol:
+        # event Unwrap(
+        #   address indexed underlying_token,
+        #   address indexed wrapped_token,
+        #   address frm,
+        #   address indexed to,
+        #   uint256 amount
+        # );
+        unwrap_event = dst_contract.events.Unwrap
+        unwrap_logs = unwrap_event.get_logs(
+            from_block=from_dst_block,
+            to_block=latest_dst_block
+        )
+    except Exception as e:
+        print("Error fetching Unwrap events:", e)
+        unwrap_logs = []
 
-                tx = src_contract.functions.withdraw(
-                    Web3.to_checksum_address(underlying),
-                    Web3.to_checksum_address(recipient),
-                    int(amount)
-                ).build_transaction({
-                    "from": acct_src.address,
-                    "nonce": nonce,
-                    "gasPrice": w3_src.eth.gas_price,
-                    "chainId": w3_src.eth.chain_id,
-                })
+    if len(unwrap_logs) > 0:
+        print(
+            f"Found {len(unwrap_logs)} Unwrap event(s) on destination "
+            f"(blocks {from_dst_block}–{latest_dst_block})"
+        )
 
-                tx["gas"] = w3_src.eth.estimate_gas(tx)
-                signed = acct_src.sign_transaction(tx)
-                tx_hash = w3_src.eth.send_raw_transaction(signed.rawTransaction)
+    for log in unwrap_logs:
+        args = log["args"]
+        try:
+            underlying_token = args["underlying_token"]
+            wrapped_token    = args["wrapped_token"]   # debug 用，不直接用到
+            frm              = args["frm"]             # unwrap 發起者
+            to               = args["to"]              # 要在 source 領回的人
+            amount           = args["amount"]
+        except KeyError as e:
+            print("Unwrap event args mismatch, missing:", e)
+            continue
 
-                print("withdraw() tx sent:", tx_hash.hex())
+        print(
+            f"Processing Unwrap: underlying={underlying_token}, wrapped={wrapped_token}, "
+            f"from={frm}, to={to}, amount={amount}"
+        )
 
-            except Exception as e:
-                print("withdraw() call failed:", e)
+        try:
+            # Source.withdraw:
+            # function withdraw(address _token, address _recipient, uint256 _amount )
+            fn = src_contract.functions.withdraw(underlying_token, to, amount)
+        except Exception as e:
+            print("Error building withdraw() call:", e)
+            continue
 
-        return 1
+        try:
+            send_tx(w3_source, fn)
+        except Exception as e:
+            print("Error sending withdraw() tx:", e)
+
+    return 1
