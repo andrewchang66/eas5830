@@ -51,8 +51,8 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     
     ##### YOUR CODE HERE #####
 
-    # 1. 設定 warden 私鑰（
-    WARDEN_PRIVATE_KEY = "0xb2567941b5da28eef618f671b105053fc2950928e0439a9eb7d6993e8adf3830" 
+    # 1. 設定 warden 私鑰
+    WARDEN_PRIVATE_KEY = "0xb2567941b5da28eef618f671b105053fc2950928e0439a9eb7d6993e8adf3830"
 
     # 小 helper：從私鑰算出 warden address
     def get_warden_address(w3):
@@ -94,7 +94,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         print("Failed to connect to RPCs")
         return 0
 
-    # 5. 讀 contract_info.json 拿地址與 ABI
+    # 讀 contract_info.json 拿地址與 ABI
     src_info = get_contract_info('source', contract_info)
     dst_info = get_contract_info('destination', contract_info)
 
@@ -110,14 +110,13 @@ def scan_blocks(chain, contract_info="contract_info.json"):
     src_contract = w3_source.eth.contract(address=src_addr, abi=src_abi)
     dst_contract = w3_destination.eth.contract(address=dst_addr, abi=dst_abi)
 
-    # 掃「最後 5 個 blocks」
+    # 掃「最後 5 個 blocks」：用在 Source 的 Deposit
     latest_src_block = w3_source.eth.block_number
-    latest_dst_block = w3_destination.eth.block_number
-
     from_src_block = max(0, latest_src_block - 4)
-    from_dst_block = max(0, latest_dst_block - 4)
 
-    # 在 source 鏈找 Deposit → destination 鏈呼叫 wrap()
+    # =========================================================
+    # A. 在 source 鏈找 Deposit → destination 鏈呼叫 wrap()
+    # =========================================================
     try:
         # Source.sol: event Deposit( address indexed token, address indexed recipient, uint256 amount );
         deposit_event = src_contract.events.Deposit
@@ -160,8 +159,14 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         except Exception as e:
             print("Error sending wrap() tx:", e)
 
-
-    # 在 destination 鏈找 Unwrap → source 鏈呼叫 withdraw()
+    # =========================================================
+    # B. 在 destination 鏈找 Unwrap → source 鏈呼叫 withdraw()
+    #    這裡只掃「最後 1～2 個 blocks」，避免 BSC RPC 的 limit exceeded
+    # =========================================================
+    latest_dst_block = w3_destination.eth.block_number
+    # 只掃最後兩個 block，降低 getLogs 回傳過多事件的機率
+    unwrap_from_block = max(0, latest_dst_block - 1)
+    unwrap_to_block = latest_dst_block
 
     try:
         # Destination.sol:
@@ -174,17 +179,17 @@ def scan_blocks(chain, contract_info="contract_info.json"):
         # );
         unwrap_event = dst_contract.events.Unwrap
         unwrap_logs = unwrap_event.get_logs(
-            from_block=from_dst_block,
-            to_block=latest_dst_block
+            from_block=unwrap_from_block,
+            to_block=unwrap_to_block
         )
     except Exception as e:
-        print("Error fetching Unwrap events:", e)
+        print("Error fetching Unwrap events:", getattr(e, "args", e))
         unwrap_logs = []
 
     if len(unwrap_logs) > 0:
         print(
             f"Found {len(unwrap_logs)} Unwrap event(s) on destination "
-            f"(blocks {from_dst_block}–{latest_dst_block})"
+            f"(blocks {unwrap_from_block}–{unwrap_to_block})"
         )
 
     for log in unwrap_logs:
