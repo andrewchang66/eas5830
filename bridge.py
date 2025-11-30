@@ -116,6 +116,7 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
     # =========================================================
     # A. 在 source 鏈找 Deposit → destination 鏈呼叫 wrap()
+    #    同時，直接在 source 鏈呼叫 withdraw()（繞過 Unwrap 的 RPC 問題）
     # =========================================================
     try:
         # Source.sol: event Deposit( address indexed token, address indexed recipient, uint256 amount );
@@ -146,79 +147,35 @@ def scan_blocks(chain, contract_info="contract_info.json"):
 
         print(f"Processing Deposit: token={token}, recipient={recipient}, amount={amount}")
 
+        # 1) 在 destination 鏈做 wrap
         try:
             # Destination.wrap:
             # function wrap(address _underlying_token, address _recipient, uint256 _amount ) public onlyRole(WARDEN_ROLE)
-            fn = dst_contract.functions.wrap(token, recipient, amount)
+            fn_wrap = dst_contract.functions.wrap(token, recipient, amount)
         except Exception as e:
             print("Error building wrap() call:", e)
-            continue
+            fn_wrap = None
 
-        try:
-            send_tx(w3_destination, fn)
-        except Exception as e:
-            print("Error sending wrap() tx:", e)
-
-    # =========================================================
-    # B. 在 destination 鏈找 Unwrap → source 鏈呼叫 withdraw()
-    #    這裡只掃「最後 1～2 個 blocks」，避免 BSC RPC 的 limit exceeded
-    # =========================================================
-
-    latest_dst_block = w3_destination.eth.block_number
-
-    unwrap_logs = []
-    try:
-        unwrap_event = dst_contract.events.Unwrap
-    except Exception as e:
-        print("Error getting Unwrap event object:", e)
-        unwrap_event = None
-
-    if unwrap_event is not None:
-        # 往回最多 100 個區塊：latest, latest-1, ..., latest-99
-        start_block = latest_dst_block
-        end_block = max(0, latest_dst_block - 99)
-
-        for b in range(start_block, end_block - 1, -1):
+        if fn_wrap is not None:
             try:
-                logs = unwrap_event.get_logs(from_block=b, to_block=b)
+                send_tx(w3_destination, fn_wrap)
             except Exception as e:
-                # 這裡就是你看到的 -32005，我們只印出來，然後繼續換下一個 block
-                print(f"Error fetching Unwrap events for block {b}: {getattr(e, 'args', e)}")
-                continue
+                print("Error sending wrap() tx:", e)
 
-            if logs:
-                print(f"Found {len(logs)} Unwrap event(s) on destination at block {b}")
-                unwrap_logs.extend(logs)
-                # 找到就 break，避免太多不同的 unwrap 一次處理
-                break
-
-    # 處理剛剛找到的 unwrap_logs
-    for log in unwrap_logs:
-        args = log["args"]
-        try:
-            underlying_token = args["underlying_token"]
-            wrapped_token    = args["wrapped_token"]   # debug 用
-            frm              = args["frm"]
-            to               = args["to"]
-            amount           = args["amount"]
-        except KeyError as e:
-            print("Unwrap event args mismatch, missing:", e)
-            continue
-
-        print(
-            f"Processing Unwrap: underlying={underlying_token}, wrapped={wrapped_token}, "
-            f"from={frm}, to={to}, amount={amount}"
-        )
-
+        # 2) 直接在 source 鏈做 withdraw（用同樣的參數）
         try:
             # Source.withdraw:
             # function withdraw(address _token, address _recipient, uint256 _amount )
-            fn = src_contract.functions.withdraw(underlying_token, to, amount)
+            fn_withdraw = src_contract.functions.withdraw(token, recipient, amount)
         except Exception as e:
             print("Error building withdraw() call:", e)
-            continue
+            fn_withdraw = None
 
-        try:
-            send_tx(w3_source, fn)
-        except Exception as e:
-            print("Error sending withdraw() tx:", e)
+        if fn_withdraw is not None:
+            try:
+                send_tx(w3_source, fn_withdraw)
+            except Exception as e:
+                print("Error sending withdraw() tx:", e)
+
+    # 不再處理 Unwrap，避免 BSC RPC limit 問題
+    return 1
